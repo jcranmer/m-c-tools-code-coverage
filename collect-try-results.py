@@ -50,7 +50,6 @@ TestConfig['build'] = {
     'tbpl': ['check']
 }
 
-testre = re.compile('try_(.*)_test-(.*)')
 uploadre = re.compile('Uploaded (gcda.*\.zip) to (https?://\S*)')
 
 # This is a map of builder filenames to (display name, hidden) tuples.
@@ -60,23 +59,9 @@ ccov = None
 def downloadTestResults(ftpName, outdir):
     # What builds are hidden?
     builders = json.load(urllib2.urlopen(
-      "https://tbpl.mozilla.org/php/getBuilders.php?branch=Try"))
-    tbplData = {}
+        "https://tbpl.mozilla.org/php/getBuilders.php?branch=Try"))
     for build in builders:
-      builder_data[build['name']] = (build['buildername'], build['hidden'])
-      match = testre.match(build['name'])
-      if match is not None:
-        tbplData.setdefault(match.group(1), {})[match.group(2)] = build['hidden']
-      else:
-        names = build['name'].split('-')
-        isdebug = names[-1] == 'debug'
-        if isdebug:
-          platform = '-'.join(names[1:-1])
-        else:
-          platform = '-'.join(names[1:])
-        if platform in PlatformConfig:
-          pseudo = PlatformConfig[platform]['tbpl'] + ['', '-debug'][isdebug]
-          tbplData.setdefault(pseudo, {})['check'] = build['hidden']
+        builder_data[build['name']] = (build['buildername'], build['hidden'])
 
     # Find builds on the try server
     ftp = ftplib.FTP("ftp.mozilla.org")
