@@ -20,66 +20,50 @@ PlatformConfig['linux64'] = {
     'package': '.tar.bz2',
     'tbpl': 'ubuntu64_vm'
 }
+PlatformConfig['linux'] = {
+    'package': '.tar.bz2',
+    'tbpl': 'ubuntu32_vm'
+}
 
 TestConfig = {}
-TestConfig['.*-crashtest-.*\\.txt\\.gz'] = {
-    'symbol': 'R-C',
-    'tbpl': 'crashtest'
-}
-TestConfig['.*-jetpack-.*\\.txt\\.gz'] = {
-    'symbol': 'JP',
-    'tbpl': 'jetpack'
-}
-TestConfig['.*-jsreftest-.*\\.txt\\.gz'] = {
-    'symbol': 'R-J',
-    'tbpl': 'jsreftest'
-}
-TestConfig['.*-mochitest-1-.*\\.txt\\.gz'] = {
-    'symbol': 'M-1',
-    'tbpl': 'mochitest-1'
-}
-TestConfig['.*-mochitest-2-.*\\.txt\\.gz'] = {
-    'symbol': 'M-2',
-    'tbpl': 'mochitest-2'
-}
-TestConfig['.*-mochitest-3-.*\\.txt\\.gz'] = {
-    'symbol': 'M-3',
-    'tbpl': 'mochitest-3'
-}
-TestConfig['.*-mochitest-4-.*\\.txt\\.gz'] = {
-    'symbol': 'M-4',
-    'tbpl': 'mochitest-4'
-}
-TestConfig['.*-mochitest-5-.*\\.txt\\.gz'] = {
-    'symbol': 'M-5',
-    'tbpl': 'mochitest-5'
-}
-TestConfig['.*-mochitest-other-.*\\.txt\\.gz'] = {
+TestConfig['cppunit'] = {'symbol': 'Cpp'}
+TestConfig['crashtest'] = {'symbol': 'R-C'}
+TestConfig['crashtest-ipc'] = {'symbol': 'R-Cipc'}
+TestConfig['jetpack'] = {'symbol': 'JP'}
+TestConfig['jsreftest'] = {'symbol': 'R-J'}
+TestConfig['mochitest-1'] = {'symbol': 'M-1'}
+TestConfig['mochitest-2'] = {'symbol': 'M-2'}
+TestConfig['mochitest-3'] = {'symbol': 'M-3'}
+TestConfig['mochitest-4'] = {'symbol': 'M-4'}
+TestConfig['mochitest-5'] = {'symbol': 'M-5'}
+TestConfig['mochitest-browser-chrome'] = {'symbol': 'M-bc'}
+TestConfig['mochitest-other'] = {
     'symbol': 'M-oth',
-    'tbpl': 'mochitest-other'
+    'tbpl': ['mochitest-chrome', 'mochitest-a11y', 'mochitest-plugins']
 }
-TestConfig['.*-reftest-.*\\.txt\\.gz'] = {
-    'symbol': 'R-R',
-    'tbpl': 'reftest'
-}
-TestConfig['.*-xpcshell-.*\\.txt\\.gz'] = {
-    'symbol': 'X',
-    'tbpl': 'xpcshell'
-}
-TestConfig['[^_]*\\.txt\\.gz'] = {
+TestConfig['reftest'] = {'symbol': 'R-R'}
+TestConfig['reftest-ipc'] = {'symbol': 'R-Ripc'}
+TestConfig['reftest-no-accel'] = {'symbol': 'R-Ru'}
+TestConfig['xpcshell'] = {'symbol': 'X'}
+TestConfig['build'] = {
     'symbol': 'B',
-    'tbpl': 'check'
+    'tbpl': ['check']
 }
 
 testre = re.compile('try_(.*)_test-(.*)')
 uploadre = re.compile('Uploaded (gcda.*\.zip) to (https?://\S*)')
 
+# This is a map of builder filenames to (display name, hidden) tuples.
+builder_data = dict()
+
+ccov = None
 def downloadTestResults(ftpName, outdir):
     # What builds are hidden?
     builders = json.load(urllib2.urlopen(
       "https://tbpl.mozilla.org/php/getBuilders.php?branch=Try"))
     tbplData = {}
     for build in builders:
+      builder_data[build['name']] = (build['buildername'], build['hidden'])
       match = testre.match(build['name'])
       if match is not None:
         tbplData.setdefault(match.group(1), {})[match.group(2)] = build['hidden']
@@ -114,8 +98,6 @@ def downloadTestResults(ftpName, outdir):
         print "Unknown platform: %s" % (platform)
         print "Ignoring..."
         break
-      config = PlatformConfig[platform]
-      hiddenlog = tbplData[config['tbpl'] + ["", "-debug"][isdebug]]
 
       # Make a local directory to download all of the files to
       platformdir = os.path.join(outdir, ftpplatformdir)
@@ -129,26 +111,6 @@ def downloadTestResults(ftpName, outdir):
       ftp.cwd(ftpplatformdir)
       collector = CoverageCollector(platformdir, ftp)
       collector.findFiles()
-      break
-
-      # Now that we have the package and the gcno data extracted, let's extract
-      # data from all of the test logs
-      logs = (f for f in files if f[-7:] == ".txt.gz")
-      for log in logs:
-        # Which test config should we use?
-        tconfig = None
-        for pattern in TestConfig:
-          if re.match(pattern, log):
-            tconfig = TestConfig[pattern]
-            break
-        if tconfig is None:
-          print "Unknown config for log file %s" % log
-          break
-
-        # Is this log hidden?
-        if hiddenlog[tconfig['tbpl']]:
-          print "Ignoring hidden build %s-%s" % (prettyname, tconfig['tbpl'])
-          continue
 
 class CoverageCollector(object):
     def __init__(self, localdir, ftp):
@@ -189,9 +151,19 @@ class CoverageCollector(object):
         self.ftp.quit()
 
         # Now actually process the logs
+        combined = []
         self.unpackPackage(localpkg)
         for log in logs:
-            self.downloadLog(log)
+            combined += self.downloadLog(log)
+
+        # Make the final platform coverage file
+        args = [ccov]
+        for sub in combined:
+            args.append('-a')
+            args.append(sub)
+        args += ['-o', os.path.join(self.localdir, 'all.info')]
+        print args
+        subprocess.check_call(args)
 
     def unpackPackage(self, package):
         print "Unpacking package for %s" % self.platform
@@ -206,14 +178,19 @@ class CoverageCollector(object):
 
     def downloadLog(self, log):
         # Which test config should we use?
-        tconfig = None
-        for pattern in TestConfig:
-            if re.match(pattern, log):
-                tconfig = TestConfig[pattern]
-                break
-        if tconfig is None:
-            print "Unknown config for log file %s" % log
-            return
+
+        # The log file name is going to be
+        # <builder>-bm##-<platform>-build#.txt.gz. We only care about the first
+        # portion of this string.
+        builder = log[:log.find("-bm")]
+        prettyname = builder_data[builder][0].split(' ')
+        # prettyname is something like Ubuntu VM 12.04 try opt test mochitest-1
+        testname = prettyname[-1]
+        try:
+            tconfig = TestConfig[testname]
+        except KeyError:
+            print "Unknown config for test %s" % testname
+            return []
 
         # XXX: Figure out if the test is hidden
 
@@ -221,7 +198,7 @@ class CoverageCollector(object):
         logfile = os.path.join(self.localdir, log)
         if not os.path.exists(logfile):
             print "Why haven't we downloaded a log yet?"
-            return
+            return []
 
         # Find the location of the gcda blobs
         files = []
@@ -234,16 +211,28 @@ class CoverageCollector(object):
 
         if len(files) == 0:
             print "Could not find any data for test %s" % tconfig['symbol']
+            return []
+
+        # Build specific names for each file
+        testnames = tconfig.get('tbpl', [testname])
+        if len(files) != len(testnames):
+            print "Found %d tests, expected %d for test %s" % (
+                len(files), len(testnames), tconfig['symbol'])
+            return []
 
         # Download those gcda files as appropriate
-        for name, url in files:
-            localname = os.path.join(self.localdir,
-                tconfig['tbpl'] + '-' + name)
+        written = []
+        for data, tname in zip(files, testnames):
+            name, url = data
+            localname = os.path.join(self.localdir, tname + '-' + name)
+            written.append(os.path.join(self.localdir, tname + '.info'))
             if not os.path.exists(localname):
-                print "Retrieving %s for test %s" % (name, tconfig['symbol'])
+                print "Retrieving %s for test %s" % (name, tname)
                 urllib.urlretrieve(url, localname)
             with zipfile.ZipFile(localname) as fd:
-                self.computeCoverage(fd, tconfig['tbpl'])
+                self.computeCoverage(fd, tname)
+
+        return written
 
     def computeCoverage(self, testzip, test):
         # Unpack the gcda directory
@@ -264,23 +253,42 @@ class CoverageCollector(object):
             gcnofd.extractall(basedir)
 
         # Run lcov to compute the output lcov file
+        lcovpre = os.path.join(self.localdir, test + '-pre.info')
         lcovname = os.path.join(self.localdir, test + '.info')
-        subprocess.check_call(['lcov', '-c', '-d', basedir, '-o', lcovname,
-            '-t', test])
+        lcovlog = os.path.join(self.localdir, test + '.log')
+        with open(lcovlog, 'w') as logfile:
+            subprocess.check_call(['lcov', '-c', '-d', basedir, '-o', lcovpre,
+                '-t', test + '-' + self.platformdir, '--gcov-tool', 'gcov-4.7'],
+                stdout=logfile, stderr=subprocess.STDOUT)
+
+            # Reprocess the file to only include m-c source code and exclude
+            # things like /usr/include/c++/blah
+            subprocess.check_call([ccov, '-a', lcovpre, '-e', '/builds/*',
+                '-o', lcovname], stdout=logfile, stderr=subprocess.STDOUT)
+
+            # Remove the original lcov file.
+            os.remove(lcovpre)
 
         shutil.rmtree(unpackDir)
 
 
 def main(argv):
+    directory = os.path.dirname(os.path.realpath(__file__))
     parser = OptionParser('Usage: %prog [options] username revision')
     parser.disable_interspersed_args()
     parser.add_option('-o', '--output-dir', dest='outputDir',
                       default="/tmp/output",
                       help="Output directory for .info files")
+    parser.add_option('-c', '--ccov-path', dest='ccovExe',
+                      default=os.path.join(directory, '..',
+                          "mozilla-coverage", "ccov.py"),
+                      help="Output directory for .info files")
     (options, args) = parser.parse_args(argv)
     if len(args) < 3:
         parser.error('Not enough arguments')
 
+    global ccov
+    ccov = options.ccovExe
     downloadTestResults(args[1] + '-' + args[2], options.outputDir)
 
 if __name__ == '__main__':
