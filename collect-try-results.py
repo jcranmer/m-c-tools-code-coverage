@@ -57,7 +57,7 @@ builder_data = dict()
 
 ccov = None
 def downloadTestResults(ftpName, outdir):
-    # What builds are hidden?
+    # Load builder data from tbpl.
     builders = json.load(urllib2.urlopen(
         "https://tbpl.mozilla.org/php/getBuilders.php?branch=Try"))
     for build in builders:
@@ -112,18 +112,18 @@ class CoverageCollector(object):
     def findFiles(self):
         files = self.ftp.nlst()
 
-        # First, find the package
+        # First, find the gcno data.
         config = PlatformConfig[self.platform]
-        package = filter(lambda f: f.endswith(config['package']), files)[0]
-        localpkg = os.path.join(self.localdir, package)
-        if not os.path.exists(localpkg):
-            with open(localpkg, 'wb') as write:
+        package = filter(lambda f: f == 'all-gcno.tbz2', files)[0]
+        self.gcnotar = os.path.join(self.localdir, 'gcno.tar.bz2')
+        if not os.path.exists(self.gcnotar):
+            print "Downloading package for %s" % self.platform
+            with open(self.gcnotar, 'wb') as write:
                 self.ftp.retrbinary("RETR %s" % package,
                     lambda block : write.write(block))
 
-        # Now process all of the log files
-        # First, download the log files (the FTP connection may timeout if we
-        # don't do this first)
+        # Download the log files before processing (the FTP connection may
+        # timeout if we don't do this first)
         logs = [f for f in files if f.endswith('.txt.gz')]
         for log in logs:
             logfile = os.path.join(self.localdir, log)
@@ -137,7 +137,6 @@ class CoverageCollector(object):
 
         # Now actually process the logs
         combined = []
-        self.unpackPackage(localpkg)
         for log in logs:
             combined += self.downloadLog(log)
 
