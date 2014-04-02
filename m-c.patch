@@ -1,111 +1,19 @@
 # HG changeset patch
-# Parent 21a815b9f4c73757abcdc6ddc1415e5333cfea9c
+# User Joshua Cranmer <Pidgeot18@gmail.com>
+# Date 1390021165 21600
+#      Fri Jan 17 22:59:25 2014 -0600
+# Node ID dfd5de862e7d6c90f12206abe85d7dd2db5c1fab
+# Parent 382f676d0ed98a144993c89a0eb21d1bd35a78c1
+[mq]: code-coverage-on-try
 
-diff --git a/Makefile.in b/Makefile.in
---- a/Makefile.in
-+++ b/Makefile.in
-@@ -220,8 +220,13 @@ libs:: .gdbinit
- # Look for R_386_PC32 relocations in shared libs, these
- # break x86_64 builds and SELinux users.
- ifeq ($(OS_TARGET)_$(TARGET_XPCOM_ABI),Linux_x86-gcc3)
- scheck::
- 	@relcount=`find $(DIST)/bin -name "*.so" | xargs objdump -R | grep R_386_PC32 | wc -l` && if test $$relcount -gt 0; then echo "FAILED: R_386_PC32 relocations detected in a shared library.  Did you use a system header without adding it to config/system-headers?"; exit 1; else echo "PASSED"; fi
- endif
- 
- js/src/Makefile: subsrcdir := js/src
-+
-+check::
-+	@echo '~!@!~!@!~!@!~!@!~!@!~!@!~!@!~!@!~'
-+	@find -name '*.gcda' | xargs tar -cj | base64
-+	@echo '~!@!~!@!~!@!~!@!~!@!~!@!~!@!~!@!~'
-diff --git a/browser/config/mozconfigs/linux32/debug b/browser/config/mozconfigs/linux32/debug
---- a/browser/config/mozconfigs/linux32/debug
-+++ b/browser/config/mozconfigs/linux32/debug
-@@ -17,8 +17,13 @@ mk_add_options MOZ_MAKE_FLAGS="-j4"
- #Use ccache
- ac_add_options --with-ccache=/usr/bin/ccache
- 
- # Treat warnings as errors in directories with FAIL_ON_WARNINGS.
- ac_add_options --enable-warnings-as-errors
- 
- # Package js shell.
- export MOZ_PACKAGE_JSSHELL=1
-+
-+# Enable code coverage
-+export CFLAGS="-fprofile-arcs -ftest-coverage"
-+export CXXFLAGS="-fprofile-arcs -ftest-coverage"
-+export LDFLAGS="-fprofile-arcs -ftest-coverage -lgcov"
-diff --git a/browser/config/mozconfigs/linux32/nightly b/browser/config/mozconfigs/linux32/nightly
---- a/browser/config/mozconfigs/linux32/nightly
-+++ b/browser/config/mozconfigs/linux32/nightly
-@@ -31,8 +31,14 @@ ac_add_options --enable-warnings-as-erro
- # Enable parallel compiling
- mk_add_options MOZ_MAKE_FLAGS="-j4"
- 
- # Use ccache
- ac_add_options --with-ccache=/usr/bin/ccache
- 
- # Package js shell.
- export MOZ_PACKAGE_JSSHELL=1
-+
-+# Enable code coverage
-+ac_add_options --disable-debug --disable-optimize
-+export CFLAGS="-fprofile-arcs -ftest-coverage"
-+export CXXFLAGS="-fprofile-arcs -ftest-coverage"
-+export LDFLAGS="-fprofile-arcs -ftest-coverage -lgcov"
-diff --git a/browser/config/mozconfigs/linux64/debug b/browser/config/mozconfigs/linux64/debug
---- a/browser/config/mozconfigs/linux64/debug
-+++ b/browser/config/mozconfigs/linux64/debug
-@@ -9,16 +9,21 @@ ENABLE_MARIONETTE=1
- ac_add_options --enable-stdcxx-compat
- 
- # Needed to enable breakpad in application.ini
- export MOZILLA_OFFICIAL=1
- 
- # Enable parallel compiling
- mk_add_options MOZ_MAKE_FLAGS="-j4"
- 
--# Use ccache
--ac_add_options --with-ccache=/usr/bin/ccache
-+## Use ccache
-+#ac_add_options --with-ccache=/usr/bin/ccache
- 
- # Treat warnings as errors in directories with FAIL_ON_WARNINGS.
- ac_add_options --enable-warnings-as-errors
- 
- # Package js shell.
- export MOZ_PACKAGE_JSSHELL=1
-+
-+# Enable code coverage
-+export CFLAGS="-fprofile-arcs -ftest-coverage"
-+export CXXFLAGS="-fprofile-arcs -ftest-coverage"
-+export LDFLAGS="-fprofile-arcs -ftest-coverage -lgcov"
-diff --git a/browser/config/mozconfigs/linux64/nightly b/browser/config/mozconfigs/linux64/nightly
---- a/browser/config/mozconfigs/linux64/nightly
-+++ b/browser/config/mozconfigs/linux64/nightly
-@@ -31,8 +31,14 @@ ac_add_options --enable-warnings-as-erro
- # Enable parallel compiling
- mk_add_options MOZ_MAKE_FLAGS="-j4"
- 
- # Use ccache
- ac_add_options --with-ccache=/usr/bin/ccache
- 
- # Package js shell.
- export MOZ_PACKAGE_JSSHELL=1
-+
-+# Enable code coverage
-+ac_add_options --disable-debug --disable-optimize
-+export CFLAGS="-fprofile-arcs -ftest-coverage"
-+export CXXFLAGS="-fprofile-arcs -ftest-coverage"
-+export LDFLAGS="-fprofile-arcs -ftest-coverage -lgcov"
 diff --git a/build/automation.py.in b/build/automation.py.in
 --- a/build/automation.py.in
 +++ b/build/automation.py.in
-@@ -1010,16 +1010,18 @@ user_pref("camino.use_system_proxy_setti
+@@ -885,16 +885,18 @@ class Automation(object):
+     crashed = self.checkForCrashes(os.path.join(profileDir, "minidumps"), symbolsPath)
  
-     # Do a final check for zombie child processes.
-     self.checkForZombies(processLog)
-     self.checkForCrashes(profileDir, symbolsPath)
+     if crashed or zombieProcesses:
+       status = 1
  
      if os.path.exists(processLog):
        os.unlink(processLog)
@@ -123,8 +31,8 @@ diff --git a/build/automation.py.in b/build/automation.py.in
 diff --git a/build/automationutils.py b/build/automationutils.py
 --- a/build/automationutils.py
 +++ b/build/automationutils.py
-@@ -14,16 +14,17 @@ from urlparse import urlparse
-   "checkForCrashes",
+@@ -39,22 +39,23 @@ except ImportError:
+   "addCommonOptions",
    "dumpLeakLog",
    "isURL",
    "processLeakLog",
@@ -133,6 +41,13 @@ diff --git a/build/automationutils.py b/build/automationutils.py
    "replaceBackSlashes",
    "wrapCommand",
 +  "collectGcdaData",
+   'KeyValueParseError',
+   'parseKeyValue',
+   'systemMemory',
+   'environment',
+   'dumpScreen',
+-  "ShutdownLeaks"
++  "ShutdownLeaks",
    ]
  
  # Map of debugging programs to information about them, like default arguments
@@ -141,102 +56,222 @@ diff --git a/build/automationutils.py b/build/automationutils.py
    # gdb requires that you supply the '--args' flag in order to pass arguments
    # after the executable name to the executable.
    "gdb": {
-@@ -412,8 +413,32 @@ def wrapCommand(cmd):
-   binary.
-   """
-   if platform.system() == "Darwin" and \
-      hasattr(platform, 'mac_ver') and \
-      platform.mac_ver()[0][:4] < '10.6':
-     return ["arch", "-arch", "i386"] + cmd
-   # otherwise just execute the command normally
-   return cmd
+@@ -668,8 +669,25 @@ class ShutdownLeaks(object):
+     counted = set()
+ 
+     for url in leakedWindows:
+       if not url in counted:
+         counts.append((url, leakedWindows.count(url)))
+         counted.add(url)
+ 
+     return sorted(counts, key=itemgetter(1), reverse=True)
 +
 +os.environ['GCOV_PREFIX'] = os.path.realpath(os.curdir)
 +def collectGcdaData():
-+  path = os.environ['GCOV_PREFIX']
-+  import tarfile
-+  fobj = open(os.tmpnam(), 'wb')
-+  tar = tarfile.TarFile.bz2open(fobj.name, mode='w', fileobj=fobj)
-+  for dirpath, dirnames, filenames in os.walk(path):
-+    gcdafiles = (f for f in filenames if f[-5:] == '.gcda')
-+    for filename in gcdafiles:
-+      fullname = os.path.join(dirpath, filename)
-+      tar.add(fullname, arcname=os.path.normpath(fullname))
-+  tar.close()
-+  # Replay the tar file in base64 to output
-+  fobj = open(fobj.name, 'rb')
-+  import base64
-+  print '~!@!~!@!~!@!~!@!~!@!~!@!~!@!~!@!~'
-+  while True:
-+    data = fobj.read(57)
-+    print base64.b64encode(data)
-+    if len(data) < 57:
-+      break
-+  fobj.close()
-+  print '~!@!~!@!~!@!~!@!~!@!~!@!~!@!~!@!~'
-diff --git a/js/src/configure.in b/js/src/configure.in
---- a/js/src/configure.in
-+++ b/js/src/configure.in
-@@ -4483,16 +4483,17 @@ if test "$JS_HAS_CTYPES" -a -z "$MOZ_NAT
-   # Run the libffi 'configure' script.
-   ac_configure_args="--disable-shared --enable-static --disable-raw-api"
-   if test "$MOZ_DEBUG"; then
-     ac_configure_args="$ac_configure_args --enable-debug"
-   fi
-   if test "$DSO_PIC_CFLAGS"; then
-     ac_configure_args="$ac_configure_args --with-pic"
-   fi
-+  export CC
-   if test "$CROSS_COMPILE"; then
-     case "$target" in
-     *-android*|*-linuxandroid*)
-       export AS CC CXX CPP LD AR RANLIB STRIP CPPFLAGS CFLAGS LDFLAGS
++    print ("Uploading gcda data")
++    path = os.environ['GCOV_PREFIX']
++    output = os.path.join(os.environ['MOZ_UPLOAD_DIR'], "gcda.zip")
++    num = 0
++    while os.path.exists(output):
++        num += 1
++        output = os.path.join(os.environ['MOZ_UPLOAD_DIR'], "gcda-%d.zip" % num)
++    import zipfile
++    with zipfile.ZipFile(output, 'w') as tar:
++        for dirpath, dirnames, filenames in os.walk(path):
++            gcdafiles = (f for f in filenames if f[-5:] == '.gcda')
++            for filename in gcdafiles:
++                fullname = os.path.join(dirpath, filename)
++                tar.write(fullname, arcname=os.path.normpath(fullname))
+diff --git a/build/macosx/mozconfig.common b/build/macosx/mozconfig.common
+--- a/build/macosx/mozconfig.common
++++ b/build/macosx/mozconfig.common
+@@ -20,8 +20,14 @@ if [ -z "$CC" ]; then
+ fi
  
-       ac_configure_args="$ac_configure_args --build=$build --host=$target HOST_CC=\"$HOST_CC\""
-       ;;
-     *)
+ # If not set use the system default clang++
+ if [ -z "$CXX" ]; then
+     export CXX=clang++
+ fi
+ 
+ ac_add_options --with-ccache
++
++# Enable code coverage
++ac_add_options --disable-optimize
++export CFLAGS="--coverage"
++export CXXFLAGS="--coverage"
++export LDFLAGS="--coverage"
+diff --git a/build/unix/mozconfig.linux b/build/unix/mozconfig.linux
+--- a/build/unix/mozconfig.linux
++++ b/build/unix/mozconfig.linux
+@@ -16,8 +16,17 @@ else
+   CC="/tools/gcc-4.7.3-0moz1/bin/gcc"
+   CXX="/tools/gcc-4.7.3-0moz1/bin/g++"
+ fi
+ 
+ ac_add_options --enable-elf-hack
+ 
+ # Avoid dependency on libstdc++ 4.7
+ ac_add_options --enable-stdcxx-compat
++
++# Enable code coverage
++ac_add_options --enable-optimize
++SCCACHE_DISABLE=1
++export CFLAGS="--coverage"
++export CXXFLAGS="--coverage"
++export LDFLAGS="--coverage"
++# NSPR seems to think that linux32-on-64-bit builds is a cross-compile.
++export HOST_LDFLAGS="--coverage"
+diff --git a/testing/mochitest/runtests.py b/testing/mochitest/runtests.py
+--- a/testing/mochitest/runtests.py
++++ b/testing/mochitest/runtests.py
+@@ -1044,16 +1044,18 @@ class Mochitest(MochitestUtilsMixin):
+       # record post-test information
+       if status:
+         log.info("TEST-UNEXPECTED-FAIL | %s | application terminated with exit code %s", self.lastTestSeen, status)
+       else:
+         self.lastTestSeen = 'Main app process exited normally'
+ 
+       log.info("INFO | runtests.py | Application ran for: %s", str(datetime.now() - startTime))
+ 
++      mozcrash.collectGcdaData()
++
+       # Do a final check for zombie child processes.
+       zombieProcesses = self.checkForZombies(processLog, utilityPath, debuggerInfo)
+ 
+       # check for crashes
+       minidump_path = os.path.join(self.profile.profile, "minidumps")
+       crashed = mozcrash.check_for_crashes(minidump_path,
+                                            symbolsPath,
+                                            test_name=self.lastTestSeen)
+diff --git a/testing/mozbase/mozcrash/mozcrash/mozcrash.py b/testing/mozbase/mozcrash/mozcrash/mozcrash.py
+--- a/testing/mozbase/mozcrash/mozcrash/mozcrash.py
++++ b/testing/mozbase/mozcrash/mozcrash/mozcrash.py
+@@ -1,14 +1,15 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ # You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ __all__ = ['check_for_crashes',
+-           'check_for_java_exception']
++           'check_for_java_exception',
++           'collectGcdaData']
+ 
+ import glob
+ import os
+ import re
+ import shutil
+ import subprocess
+ import sys
+ import tempfile
+@@ -199,8 +200,25 @@ def check_for_java_exception(logcat, qui
+                     exception_location = m.group(1)
+                 if not quiet:
+                     print "PROCESS-CRASH | java-exception | %s %s" % (exception_type, exception_location)
+             else:
+                 print "Automation Error: Logcat is truncated!"
+             break
+ 
+     return found_exception
++
++gcovprefix = os.path.realpath(os.curdir)
++os.environ['GCOV_PREFIX'] = gcovprefix
++def collectGcdaData():
++    print ("Uploading gcda data")
++    output = os.path.join(os.environ['MOZ_UPLOAD_DIR'], "gcda.zip")
++    num = 0
++    while os.path.exists(output):
++        num += 1
++        output = os.path.join(os.environ['MOZ_UPLOAD_DIR'], "gcda-%d.zip" % num)
++    import zipfile
++    with zipfile.ZipFile(output, 'w') as tar:
++        for dirpath, dirnames, filenames in os.walk(gcovprefix):
++            gcdafiles = (f for f in filenames if f.endswith('.gcda'))
++            for filename in gcdafiles:
++                fullname = os.path.join(dirpath, filename)
++                tar.write(fullname, arcname=os.path.normpath(fullname))
+diff --git a/testing/runcppunittests.py b/testing/runcppunittests.py
+--- a/testing/runcppunittests.py
++++ b/testing/runcppunittests.py
+@@ -119,16 +119,17 @@ class CPPUnitTests(object):
+             if single_result:
+                 pass_count += 1
+             else:
+                 fail_count += 1
+ 
+         log.info("Result summary:")
+         log.info("Passed: %d" % pass_count)
+         log.info("Failed: %d" % fail_count)
++        mozcrash.collectGcdaData()
+         return fail_count == 0
+ 
+ class CPPUnittestOptions(OptionParser):
+     def __init__(self):
+         OptionParser.__init__(self)
+         self.add_option("--xre-path",
+                         action = "store", type = "string", dest = "xre_path",
+                         default = None,
 diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
 --- a/testing/xpcshell/runxpcshelltests.py
 +++ b/testing/xpcshell/runxpcshelltests.py
-@@ -834,16 +834,20 @@ class XPCShellTests(object):
-         else:
-           xunitResults.append(xunitResult)
-           break
+@@ -1492,16 +1492,20 @@ class XPCShellTests(object):
+                 self.log.info("INFO | %s could not be cleaned up." % directory)
  
-       xunitResults.append(xunitResult)
+         if exceptions:
+             self.log.info("INFO | Following exceptions were raised:")
+             for t in tracebacks:
+                 self.log.error(t)
+             raise exceptions[0]
  
-     self.shutdownNode()
- 
-+    # Don't output the log if we're doing tests
-+    if self.log.handlers[0].stream == sys.stdout:
-+      collectGcdaData()
++        # Don't output the log if we're doing tests
++        if self.log.handlers[0].stream == sys.stdout:
++            mozcrash.collectGcdaData()
 +
-     if self.testCount == 0:
-       self.log.error("TEST-UNEXPECTED-FAIL | runxpcshelltests.py | No tests run. Did you pass an invalid --test-path?")
-       self.failCount = 1
+         if self.testCount == 0:
+             self.log.error("TEST-UNEXPECTED-FAIL | runxpcshelltests.py | No tests run. Did you pass an invalid --test-path?")
+             self.failCount = 1
  
-     self.log.info("""INFO | Result summary:
- INFO | Passed: %d
- INFO | Failed: %d
- INFO | Todo: %d""" % (self.passCount, self.failCount, self.todoCount))
+         self.log.info("INFO | Result summary:")
+         self.log.info("INFO | Passed: %d" % self.passCount)
+         self.log.info("INFO | Failed: %d" % self.failCount)
+         self.log.info("INFO | Todo: %d" % self.todoCount)
 diff --git a/toolkit/mozapps/installer/packager.mk b/toolkit/mozapps/installer/packager.mk
 --- a/toolkit/mozapps/installer/packager.mk
 +++ b/toolkit/mozapps/installer/packager.mk
-@@ -867,16 +867,17 @@ endif # MOZ_POST_STAGING_CMD
+@@ -719,16 +719,17 @@ stage-package: $(MOZ_PKG_MANIFEST)
  ifndef LIBXUL_SDK
  ifdef MOZ_PACKAGE_JSSHELL
  # Package JavaScript Shell
- 	@echo "Packaging JavaScript Shell..."
+ 	@echo 'Packaging JavaScript Shell...'
  	$(RM) $(PKG_JSSHELL)
  	$(MAKE_JSSHELL)
  endif # MOZ_PACKAGE_JSSHELL
  endif # LIBXUL_SDK
-+	find $(DEPTH) -name '*.gcno' | tar -cjf $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)/gcno.tar.bz2 -T -
++	find $(DEPTH) -name '*.gcno' | tar -cjf $(DIST)/$(GCNO_TAR) -T -
  
- make-package-internal: stage-package $(PACKAGE_XULRUNNER) make-sourcestamp-file
- 	@echo "Compressing..."
+ prepare-package: stage-package
+ 
+ make-package-internal: prepare-package make-sourcestamp-file make-buildinfo-file
+ 	@echo 'Compressing...'
  	cd $(DIST) && $(MAKE_PACKAGE)
  
- ifdef MOZ_FAST_PACKAGE
- MAKE_PACKAGE_DEPS = $(wildcard $(subst * , ,$(addprefix $(DIST)/bin/,$(shell $(PYTHON) $(topsrcdir)/toolkit/mozapps/installer/packager-deps.py $(MOZ_PKG_MANIFEST)))))
+ make-package: FORCE
+@@ -848,16 +849,19 @@ CHECKSUM_FILES = $(CHECKSUM_FILE)
+ ifeq (WINNT,$(OS_TARGET))
+ UPLOAD_EXTRA_FILES += host/bin/mar.exe
+ UPLOAD_EXTRA_FILES += host/bin/mbsdiff.exe
  else
+ UPLOAD_EXTRA_FILES += host/bin/mar
+ UPLOAD_EXTRA_FILES += host/bin/mbsdiff
+ endif
+ 
++GCNO_TAR := all-gcno.tbz2
++UPLOAD_EXTRA_FILES += $(GCNO_TAR)
++
+ UPLOAD_FILES= \
+   $(call QUOTED_WILDCARD,$(DIST)/$(PACKAGE)) \
+   $(call QUOTED_WILDCARD,$(INSTALLER_PACKAGE)) \
+   $(call QUOTED_WILDCARD,$(DIST)/$(COMPLETE_MAR)) \
+   $(call QUOTED_WILDCARD,$(DIST)/$(LANGPACK)) \
+   $(call QUOTED_WILDCARD,$(wildcard $(DIST)/$(PARTIAL_MAR))) \
+   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(TEST_PACKAGE)) \
+   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip) \

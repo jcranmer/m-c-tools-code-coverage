@@ -17,11 +17,9 @@ from optparse import OptionParser
 
 PlatformConfig = {}
 PlatformConfig['linux64'] = {
-    'package': '.tar.bz2',
     'tbpl': 'ubuntu64_vm'
 }
 PlatformConfig['linux'] = {
-    'package': '.tar.bz2',
     'tbpl': 'ubuntu32_vm'
 }
 
@@ -80,9 +78,9 @@ def downloadTestResults(ftpName, outdir):
       platform = isdebug and dircomps[-2] or dircomps[-1]
       prettyname = platform + ["", "-debug"][isdebug]
       if platform not in PlatformConfig:
-        print "Unknown platform: %s" % (platform)
-        print "Ignoring..."
-        break
+            print "Unknown platform: %s" % (platform)
+            print "Ignoring..."
+            continue
 
       # Make a local directory to download all of the files to
       platformdir = os.path.join(outdir, ftpplatformdir)
@@ -113,7 +111,6 @@ class CoverageCollector(object):
         files = self.ftp.nlst()
 
         # First, find the gcno data.
-        config = PlatformConfig[self.platform]
         package = filter(lambda f: f == 'all-gcno.tbz2', files)[0]
         self.gcnotar = os.path.join(self.localdir, 'gcno.tar.bz2')
         if not os.path.exists(self.gcnotar):
@@ -148,17 +145,6 @@ class CoverageCollector(object):
         args += ['-o', os.path.join(self.localdir, 'all.info')]
         print args
         subprocess.check_call(args)
-
-    def unpackPackage(self, package):
-        print "Unpacking package for %s" % self.platform
-        # Output the package into a seperate gcno directory
-        self.gcnotar = os.path.join(self.localdir, 'gcno.tar.bz2')
-        with tarfile.open(package) as tarball:
-            gcnoentry = filter(lambda f: f.name.endswith('gcno.tar.bz2'),
-                tarball.getmembers())[0]
-            innerfd = tarball.extractfile(gcnoentry)
-            with open(self.gcnotar, 'wb') as gcnofd:
-                gcnofd.write(innerfd.read())
 
     def downloadLog(self, log):
         # Which test config should we use?
@@ -241,7 +227,10 @@ class CoverageCollector(object):
         lcovname = os.path.join(self.localdir, test + '.info')
         lcovlog = os.path.join(self.localdir, test + '.log')
         with open(lcovlog, 'w') as logfile:
-            subprocess.check_call(['lcov', '-c', '-d', basedir, '-o', lcovpre,
+            #subprocess.check_call(['lcov', '-c', '-d', basedir, '-o', lcovpre,
+            #    '-t', test + '-' + self.platformdir, '--gcov-tool', 'gcov-4.7'],
+            #    stdout=logfile, stderr=subprocess.STDOUT)
+            subprocess.check_call([ccov, '-c', basedir, '-o', lcovpre,
                 '-t', test + '-' + self.platformdir, '--gcov-tool', 'gcov-4.7'],
                 stdout=logfile, stderr=subprocess.STDOUT)
 
