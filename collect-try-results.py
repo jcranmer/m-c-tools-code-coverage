@@ -15,85 +15,88 @@ import zipfile
 
 from optparse import OptionParser
 
-PlatformConfig = {}
-PlatformConfig['linux64'] = {
-    'tbpl': 'ubuntu64_vm'
-}
-PlatformConfig['linux'] = {
-    'tbpl': 'ubuntu32_vm'
-}
-
 TestConfig = {}
-TestConfig['cppunit'] = {'symbol': 'Cpp'}
-TestConfig['crashtest'] = {'symbol': 'R-C'}
-TestConfig['crashtest-ipc'] = {'symbol': 'R-Cipc'}
-TestConfig['jetpack'] = {'symbol': 'JP'}
-TestConfig['jsreftest'] = {'symbol': 'R-J'}
-TestConfig['mochitest-1'] = {'symbol': 'M-1'}
-TestConfig['mochitest-2'] = {'symbol': 'M-2'}
-TestConfig['mochitest-3'] = {'symbol': 'M-3'}
-TestConfig['mochitest-4'] = {'symbol': 'M-4'}
-TestConfig['mochitest-5'] = {'symbol': 'M-5'}
-TestConfig['mochitest-browser-chrome'] = {'symbol': 'M-bc'}
-TestConfig['mochitest-other'] = {
-    'symbol': 'M-oth',
-    'tbpl': ['mochitest-chrome', 'mochitest-a11y', 'mochitest-plugins']
+TestConfig['Cpp'] = {'name': 'cppunit'}
+TestConfig['Jit'] = {'name': 'jittest'}
+TestConfig['JP'] = {'name': 'jetpack'}
+TestConfig['M-1'] = {'name': 'mochitest-1'}
+TestConfig['M-2'] = {'name': 'mochitest-2'}
+TestConfig['M-3'] = {'name': 'mochitest-3'}
+TestConfig['M-4'] = {'name': 'mochitest-4'}
+TestConfig['M-5'] = {'name': 'mochitest-5'}
+TestConfig['M-bc1'] = {'name': 'mochitest-browser-chrome-1'}
+TestConfig['M-bc2'] = {'name': 'mochitest-browser-chrome-2'}
+TestConfig['M-bc3'] = {'name': 'mochitest-browser-chrome-3'}
+TestConfig['M-dt'] = {'name': 'mochitest-devtools'}
+TestConfig['M-oth'] = {
+    'name': ['mochitest-chrome', 'mochitest-a11y', 'mochitest-plugins']
 }
-TestConfig['reftest'] = {'symbol': 'R-R'}
-TestConfig['reftest-ipc'] = {'symbol': 'R-Ripc'}
-TestConfig['reftest-no-accel'] = {'symbol': 'R-Ru'}
-TestConfig['xpcshell'] = {'symbol': 'X'}
-TestConfig['build'] = {
-    'symbol': 'B',
-    'tbpl': ['check']
-}
-
-uploadre = re.compile('Uploaded (gcda.*\.zip) to (https?://\S*)')
+TestConfig['M-e10s-M-e10s'] = {'name': 'mochitest-e10s'}
+TestConfig['Mn'] = {'name': 'marionette'}
+TestConfig['R-C'] = {'name': 'crashtest'}
+TestConfig['R-Cipc'] = {'name': 'crashtest-ipc'}
+TestConfig['R-J'] = {'name': 'jsreftest'}
+TestConfig['R-R'] = {'name': 'reftest'}
+TestConfig['R-Ripc'] = {'name': 'reftest-ipc'}
+TestConfig['R-Ru'] = {'name': 'reftest-no-accel'}
+TestConfig['X'] = {'name': 'xpcshell'}
 
 # This is a map of builder filenames to (display name, hidden) tuples.
 builder_data = dict()
 
 ccov = None
-def downloadTestResults(ftpName, outdir):
-    # Load builder data from tbpl.
-    builders = json.load(urllib2.urlopen(
-        "https://tbpl.mozilla.org/php/getBuilders.php?branch=Try"))
-    for build in builders:
-        builder_data[build['name']] = (build['buildername'], build['hidden'])
+def loadConfig(job):
+    shortname = job['job_group_symbol'] + '-' + job['job_type_symbol']
+    if shortname.startswith('?-'):
+        shortname = shortname[2:]
+    result = {'shortname': shortname}
+    if shortname not in TestConfig:
+        raise Exception("Unknown test %s" % shortname)
+    result.update(TestConfig[shortname])
+    if not isinstance(result['name'], list):
+        result['name'] = [result['name']]
+    return result
 
-    # Find builds on the try server
-    ftp = ftplib.FTP("ftp.mozilla.org")
-    ftp.login()
-    ftp.cwd("pub/mozilla.org/firefox/try-builds/" + ftpName)
-    platforms = ftp.nlst()
-    ftp.quit()
+def loadJSON(uri):
+    return json.load(urllib2.urlopen("http://treeherder-dev.allizom.org" + uri))
 
-    # Utilities for the download process
-    for ftpplatformdir in platforms:
-      # Extract the platform from the directory name.
-      # For try, this is try-<platform>[-debug]
-      # try-c-c has try-comm-central-<platform>[-debug]
-      dircomps = ftpplatformdir.split('-')
-      isdebug = dircomps[-1] == "debug"
-      platform = isdebug and dircomps[-2] or dircomps[-1]
-      prettyname = platform + ["", "-debug"][isdebug]
-      if platform not in PlatformConfig:
-            print "Unknown platform: %s" % (platform)
-            print "Ignoring..."
+def downloadTreeherder(revision, outdir):
+    # Load the list of jobs from treeherder
+    data = json.load(urllib2.urlopen(
+        "http://treeherder-dev.allizom.org/api/project/try/resultset/" +
+        "?format=json&with_jobs=true&revision=" + revision))['results'][0]
+    platforms = dict()
+    for p in data['platforms']:
+        jobs = []
+        for g in p['groups']:
+            jobs += g['jobs']
+        platforms[p['name'] + '-' + p['option']] = jobs
+
+    # For each platform, work out the corresponding FTP dir
+    for pname in platforms:
+        print('Processing platform %s' % pname)
+        jobs = platforms[pname]
+        if jobs[0]['result'] == 'busted':
+            print "Job %s did not build correctly, skipping" % pname
             continue
+        logfile = loadJSON(jobs[0]['resource_uri'])['logs'][0]['url']
+        ftpdir = logfile[logfile.find('.org/') + 5:logfile.rfind('/')]
+        ftpplatformdir = ftpdir[ftpdir.rfind('/') + 1:]
 
-      # Make a local directory to download all of the files to
-      platformdir = os.path.join(outdir, ftpplatformdir)
-      if not os.path.exists(platformdir):
-        os.makedirs(platformdir)
+        # Make a local directory to download all of the files to
+        platformdir = os.path.join(outdir, ftpplatformdir)
+        if not os.path.exists(platformdir):
+            os.makedirs(platformdir)
 
-      # Extract files from the FTP server.
-      ftp = ftplib.FTP("ftp.mozilla.org")
-      ftp.login()
-      ftp.cwd("pub/mozilla.org/firefox/try-builds/" + ftpName)
-      ftp.cwd(ftpplatformdir)
-      collector = CoverageCollector(platformdir, ftp)
-      collector.findFiles()
+        # Extract files from the FTP server.
+        ftp = ftplib.FTP("ftp.mozilla.org")
+        ftp.login()
+        ftp.cwd(ftpdir)
+        collector = CoverageCollector(platformdir, ftp)
+        collector.downloadNotes()
+
+        for job in jobs[1:]:
+            collector.processJob(job)
 
 class CoverageCollector(object):
     def __init__(self, localdir, ftp):
@@ -107,7 +110,7 @@ class CoverageCollector(object):
         else:
             self.isDebug = False
 
-    def findFiles(self):
+    def downloadNotes(self):
         files = self.ftp.nlst()
 
         # First, find the gcno data.
@@ -119,80 +122,39 @@ class CoverageCollector(object):
                 self.ftp.retrbinary("RETR %s" % package,
                     lambda block : write.write(block))
 
-        # Download the log files before processing (the FTP connection may
-        # timeout if we don't do this first)
-        logs = [f for f in files if f.endswith('.txt.gz')]
-        for log in logs:
-            logfile = os.path.join(self.localdir, log)
-            if os.path.exists(logfile):
-                continue
-            with open(logfile, 'wb') as locallog:
-                print "Retrieving log %s" % log
-                self.ftp.retrbinary("RETR %s" % log,
-                    lambda block : locallog.write(block))
         self.ftp.quit()
 
-        # Now actually process the logs
-        combined = []
-        for log in logs:
-            combined += self.downloadLog(log)
+    def processJob(self, job):
+        tconfig = loadConfig(job)
 
-        # Make the final platform coverage file
-        args = [ccov]
-        for sub in combined:
-            args.append('-a')
-            args.append(sub)
-        args += ['-o', os.path.join(self.localdir, 'all.info')]
-        print args
-        subprocess.check_call(args)
-
-    def downloadLog(self, log):
-        # Which test config should we use?
-
-        # The log file name is going to be
-        # <builder>-bm##-<platform>-build#.txt.gz. We only care about the first
-        # portion of this string.
-        builder = log[:log.find("-bm")]
-        prettyname = builder_data[builder][0].split(' ')
-        # prettyname is something like Ubuntu VM 12.04 try opt test mochitest-1
-        testname = prettyname[-1]
-        try:
-            tconfig = TestConfig[testname]
-        except KeyError:
-            print "Unknown config for test %s" % testname
-            return []
-
-        # XXX: Figure out if the test is hidden
-
-        # Retrieve the log of interest
-        logfile = os.path.join(self.localdir, log)
-        if not os.path.exists(logfile):
-            print "Why haven't we downloaded a log yet?"
-            return []
-
-        # Find the location of the gcda blobs
-        files = []
-        with gzip.open(logfile, 'rb') as gziplog:
-            for line in gziplog:
-                if 'TinderboxPrint' not in line: continue
-                match = uploadre.search(line)
-                if match is None: continue
-                files.append((match.group(1), match.group(2)))
-
+        # Find all of the gcda artifacts.
+        data = loadJSON(job['resource_uri'])
+        artifact = filter(lambda x: x['name'] == 'Job Info',
+            data['artifacts'])
+        if len(artifact) == 0:
+            print("Can't find results for %s, try again later?" %
+                tconfig['shortname'])
+            return
+        ajson = loadJSON(artifact[0]['resource_uri'])
+        artifacts = dict()
+        for a in ajson['blob']['job_details']:
+            if a['title'] != 'artifact uploaded': continue
+            artifacts[a['value']] = a['url']
+        files = filter(lambda x: re.match('gcda.*?.zip', x), artifacts)
+        files.sort()
         if len(files) == 0:
-            print "Could not find any data for test %s" % tconfig['symbol']
-            return []
+            print("No coverage data for %s" % tconfig['shortname'])
+            return
 
-        # Build specific names for each file
-        testnames = tconfig.get('tbpl', [testname])
-        if len(files) != len(testnames):
-            print "Found %d tests, expected %d for test %s" % (
-                len(files), len(testnames), tconfig['symbol'])
-            return []
+        # Map test names to artifact URLs
+        if len(files) != len(tconfig['name']):
+            print("Mismatch for test %s" % tconfig['shortname'])
+            return
+        files = ((f, artifacts[f]) for f in files)
 
         # Download those gcda files as appropriate
         written = []
-        for data, tname in zip(files, testnames):
+        for data, tname in zip(files, tconfig['name']):
             name, url = data
             localname = os.path.join(self.localdir, tname + '-' + name)
             written.append(os.path.join(self.localdir, tname + '.info'))
@@ -201,8 +163,6 @@ class CoverageCollector(object):
                 urllib.urlretrieve(url, localname)
             with zipfile.ZipFile(localname) as fd:
                 self.computeCoverage(fd, tname)
-
-        return written
 
     def computeCoverage(self, testzip, test):
         # Unpack the gcda directory
@@ -247,7 +207,7 @@ class CoverageCollector(object):
 
 def main(argv):
     directory = os.path.dirname(os.path.realpath(__file__))
-    parser = OptionParser('Usage: %prog [options] username revision')
+    parser = OptionParser('Usage: %prog [options] revision')
     parser.disable_interspersed_args()
     parser.add_option('-o', '--output-dir', dest='outputDir',
                       default="/tmp/output",
@@ -257,12 +217,12 @@ def main(argv):
                           "mozilla-coverage", "ccov.py"),
                       help="Output directory for .info files")
     (options, args) = parser.parse_args(argv)
-    if len(args) < 3:
+    if len(args) != 2:
         parser.error('Not enough arguments')
 
     global ccov
     ccov = options.ccovExe
-    downloadTestResults(args[1] + '-' + args[2], options.outputDir)
+    downloadTreeherder(args[1], options.outputDir)
 
 if __name__ == '__main__':
     main(sys.argv)

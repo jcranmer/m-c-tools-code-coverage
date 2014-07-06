@@ -3,13 +3,13 @@
 # Date 1390021165 21600
 #      Fri Jan 17 22:59:25 2014 -0600
 # Node ID dfd5de862e7d6c90f12206abe85d7dd2db5c1fab
-# Parent 382f676d0ed98a144993c89a0eb21d1bd35a78c1
+# Parent 81691a55e60fb8c00c37024db895785b91491dce
 [mq]: code-coverage-on-try
 
 diff --git a/build/automation.py.in b/build/automation.py.in
 --- a/build/automation.py.in
 +++ b/build/automation.py.in
-@@ -885,16 +885,18 @@ class Automation(object):
+@@ -890,16 +890,18 @@ class Automation(object):
      crashed = self.checkForCrashes(os.path.join(profileDir, "minidumps"), symbolsPath)
  
      if crashed or zombieProcesses:
@@ -56,8 +56,7 @@ diff --git a/build/automationutils.py b/build/automationutils.py
    # gdb requires that you supply the '--args' flag in order to pass arguments
    # after the executable name to the executable.
    "gdb": {
-@@ -668,8 +669,25 @@ class ShutdownLeaks(object):
-     counted = set()
+@@ -693,16 +694,33 @@ class ShutdownLeaks(object):
  
      for url in leakedWindows:
        if not url in counted:
@@ -65,7 +64,7 @@ diff --git a/build/automationutils.py b/build/automationutils.py
          counted.add(url)
  
      return sorted(counts, key=itemgetter(1), reverse=True)
-+
+ 
 +os.environ['GCOV_PREFIX'] = os.path.realpath(os.curdir)
 +def collectGcdaData():
 +    print ("Uploading gcda data")
@@ -82,10 +81,19 @@ diff --git a/build/automationutils.py b/build/automationutils.py
 +            for filename in gcdafiles:
 +                fullname = os.path.join(dirpath, filename)
 +                tar.write(fullname, arcname=os.path.normpath(fullname))
++
+ 
+ class LSANLeaks(object):
+   """
+   Parses the log when running an LSAN build, looking for interesting stack frames
+   in allocation stacks, and prints out reports.
+   """
+ 
+   def __init__(self, logger):
 diff --git a/build/macosx/mozconfig.common b/build/macosx/mozconfig.common
 --- a/build/macosx/mozconfig.common
 +++ b/build/macosx/mozconfig.common
-@@ -20,8 +20,14 @@ if [ -z "$CC" ]; then
+@@ -22,8 +22,14 @@ if [ -z "$CC" ]; then
  fi
  
  # If not set use the system default clang++
@@ -93,7 +101,7 @@ diff --git a/build/macosx/mozconfig.common b/build/macosx/mozconfig.common
      export CXX=clang++
  fi
  
- ac_add_options --with-ccache
+ . "$topsrcdir/build/mozconfig.cache"
 +
 +# Enable code coverage
 +ac_add_options --disable-optimize
@@ -103,8 +111,7 @@ diff --git a/build/macosx/mozconfig.common b/build/macosx/mozconfig.common
 diff --git a/build/unix/mozconfig.linux b/build/unix/mozconfig.linux
 --- a/build/unix/mozconfig.linux
 +++ b/build/unix/mozconfig.linux
-@@ -16,8 +16,17 @@ else
-   CC="/tools/gcc-4.7.3-0moz1/bin/gcc"
+@@ -22,16 +22,25 @@ else
    CXX="/tools/gcc-4.7.3-0moz1/bin/g++"
  fi
  
@@ -112,7 +119,7 @@ diff --git a/build/unix/mozconfig.linux b/build/unix/mozconfig.linux
  
  # Avoid dependency on libstdc++ 4.7
  ac_add_options --enable-stdcxx-compat
-+
+ 
 +# Enable code coverage
 +ac_add_options --enable-optimize
 +SCCACHE_DISABLE=1
@@ -121,10 +128,19 @@ diff --git a/build/unix/mozconfig.linux b/build/unix/mozconfig.linux
 +export LDFLAGS="--coverage"
 +# NSPR seems to think that linux32-on-64-bit builds is a cross-compile.
 +export HOST_LDFLAGS="--coverage"
++
+ # $topsrcdir/gtk3 comes from tooltool, when the tooltool manifest contains it.
+ if [ -d "$topsrcdir/gtk3" ]; then
+   # PKG_CONFIG_LIBDIR is appropriately overridden in mozconfig.linux32
+   export PKG_CONFIG_LIBDIR=/usr/lib64/pkgconfig:/usr/share/pkgconfig
+   export PKG_CONFIG_SYSROOT_DIR="$topsrcdir/gtk3"
+   export PKG_CONFIG_PATH="$topsrcdir/gtk3/usr/local/lib/pkgconfig"
+   export PATH="$topsrcdir/gtk3/usr/local/bin:${PATH}"
+   # Ensure cairo, gdk-pixbuf, etc. are not taken from the system installed packages.
 diff --git a/testing/mochitest/runtests.py b/testing/mochitest/runtests.py
 --- a/testing/mochitest/runtests.py
 +++ b/testing/mochitest/runtests.py
-@@ -1044,16 +1044,18 @@ class Mochitest(MochitestUtilsMixin):
+@@ -1316,16 +1316,18 @@ class Mochitest(MochitestUtilsMixin):
        # record post-test information
        if status:
          log.info("TEST-UNEXPECTED-FAIL | %s | application terminated with exit code %s", self.lastTestSeen, status)
@@ -192,7 +208,7 @@ diff --git a/testing/mozbase/mozcrash/mozcrash/mozcrash.py b/testing/mozbase/moz
 diff --git a/testing/runcppunittests.py b/testing/runcppunittests.py
 --- a/testing/runcppunittests.py
 +++ b/testing/runcppunittests.py
-@@ -119,16 +119,17 @@ class CPPUnitTests(object):
+@@ -122,16 +122,17 @@ class CPPUnitTests(object):
              if single_result:
                  pass_count += 1
              else:
@@ -213,7 +229,7 @@ diff --git a/testing/runcppunittests.py b/testing/runcppunittests.py
 diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
 --- a/testing/xpcshell/runxpcshelltests.py
 +++ b/testing/xpcshell/runxpcshelltests.py
-@@ -1492,16 +1492,20 @@ class XPCShellTests(object):
+@@ -1498,16 +1498,20 @@ class XPCShellTests(object):
                  self.log.info("INFO | %s could not be cleaned up." % directory)
  
          if exceptions:
@@ -237,7 +253,7 @@ diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshell
 diff --git a/toolkit/mozapps/installer/packager.mk b/toolkit/mozapps/installer/packager.mk
 --- a/toolkit/mozapps/installer/packager.mk
 +++ b/toolkit/mozapps/installer/packager.mk
-@@ -719,16 +719,17 @@ stage-package: $(MOZ_PKG_MANIFEST)
+@@ -736,16 +736,17 @@ stage-package: $(MOZ_PKG_MANIFEST)
  ifndef LIBXUL_SDK
  ifdef MOZ_PACKAGE_JSSHELL
  # Package JavaScript Shell
@@ -255,7 +271,7 @@ diff --git a/toolkit/mozapps/installer/packager.mk b/toolkit/mozapps/installer/p
  	cd $(DIST) && $(MAKE_PACKAGE)
  
  make-package: FORCE
-@@ -848,16 +849,19 @@ CHECKSUM_FILES = $(CHECKSUM_FILE)
+@@ -865,16 +866,19 @@ CHECKSUM_FILES = $(CHECKSUM_FILE)
  ifeq (WINNT,$(OS_TARGET))
  UPLOAD_EXTRA_FILES += host/bin/mar.exe
  UPLOAD_EXTRA_FILES += host/bin/mbsdiff.exe
