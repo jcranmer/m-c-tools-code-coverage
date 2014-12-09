@@ -3,97 +3,26 @@
 # Date 1390021165 21600
 #      Fri Jan 17 22:59:25 2014 -0600
 # Node ID dfd5de862e7d6c90f12206abe85d7dd2db5c1fab
-# Parent 81691a55e60fb8c00c37024db895785b91491dce
+# Parent e0c5ab3acc4e9e9652c0ce8ee56aeadd48e0346b
 [mq]: code-coverage-on-try
 
-diff --git a/build/automation.py.in b/build/automation.py.in
---- a/build/automation.py.in
-+++ b/build/automation.py.in
-@@ -890,16 +890,18 @@ class Automation(object):
-     crashed = self.checkForCrashes(os.path.join(profileDir, "minidumps"), symbolsPath)
+diff --git a/browser/config/mozconfigs/common b/browser/config/mozconfigs/common
+--- a/browser/config/mozconfigs/common
++++ b/browser/config/mozconfigs/common
+@@ -1,7 +1,9 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
  
-     if crashed or zombieProcesses:
-       status = 1
+ # This file is included by all browser mozconfigs
  
-     if os.path.exists(processLog):
-       os.unlink(processLog)
- 
-+    automationutils.collectGcdaData()
+ . "$topsrcdir/build/mozconfig.common"
 +
-     if self.IS_TEST_BUILD and runSSLTunnel:
-       ssltunnelProcess.kill()
- 
-     return status
- 
-   def getExtensionIDFromRDF(self, rdfSource):
-     """
-     Retrieves the extension id from an install.rdf file (or string).
-diff --git a/build/automationutils.py b/build/automationutils.py
---- a/build/automationutils.py
-+++ b/build/automationutils.py
-@@ -39,22 +39,23 @@ except ImportError:
-   "addCommonOptions",
-   "dumpLeakLog",
-   "isURL",
-   "processLeakLog",
-   "getDebuggerInfo",
-   "DEBUGGER_INFO",
-   "replaceBackSlashes",
-   "wrapCommand",
-+  "collectGcdaData",
-   'KeyValueParseError',
-   'parseKeyValue',
-   'systemMemory',
-   'environment',
-   'dumpScreen',
--  "ShutdownLeaks"
-+  "ShutdownLeaks",
-   ]
- 
- # Map of debugging programs to information about them, like default arguments
- # and whether or not they are interactive.
- DEBUGGER_INFO = {
-   # gdb requires that you supply the '--args' flag in order to pass arguments
-   # after the executable name to the executable.
-   "gdb": {
-@@ -693,16 +694,33 @@ class ShutdownLeaks(object):
- 
-     for url in leakedWindows:
-       if not url in counted:
-         counts.append((url, leakedWindows.count(url)))
-         counted.add(url)
- 
-     return sorted(counts, key=itemgetter(1), reverse=True)
- 
-+os.environ['GCOV_PREFIX'] = os.path.realpath(os.curdir)
-+def collectGcdaData():
-+    print ("Uploading gcda data")
-+    path = os.environ['GCOV_PREFIX']
-+    output = os.path.join(os.environ['MOZ_UPLOAD_DIR'], "gcda.zip")
-+    num = 0
-+    while os.path.exists(output):
-+        num += 1
-+        output = os.path.join(os.environ['MOZ_UPLOAD_DIR'], "gcda-%d.zip" % num)
-+    import zipfile
-+    with zipfile.ZipFile(output, 'w') as tar:
-+        for dirpath, dirnames, filenames in os.walk(path):
-+            gcdafiles = (f for f in filenames if f[-5:] == '.gcda')
-+            for filename in gcdafiles:
-+                fullname = os.path.join(dirpath, filename)
-+                tar.write(fullname, arcname=os.path.normpath(fullname))
-+
- 
- class LSANLeaks(object):
-   """
-   Parses the log when running an LSAN build, looking for interesting stack frames
-   in allocation stacks, and prints out reports.
-   """
- 
-   def __init__(self, logger):
++export MOZ_CODE_COVERAGE=1
 diff --git a/build/macosx/mozconfig.common b/build/macosx/mozconfig.common
 --- a/build/macosx/mozconfig.common
 +++ b/build/macosx/mozconfig.common
-@@ -22,8 +22,14 @@ if [ -z "$CC" ]; then
+@@ -28,8 +28,14 @@ if [ -z "$CC" ]; then
  fi
  
  # If not set use the system default clang++
@@ -137,123 +66,38 @@ diff --git a/build/unix/mozconfig.linux b/build/unix/mozconfig.linux
    export PKG_CONFIG_PATH="$topsrcdir/gtk3/usr/local/lib/pkgconfig"
    export PATH="$topsrcdir/gtk3/usr/local/bin:${PATH}"
    # Ensure cairo, gdk-pixbuf, etc. are not taken from the system installed packages.
-diff --git a/testing/mochitest/runtests.py b/testing/mochitest/runtests.py
---- a/testing/mochitest/runtests.py
-+++ b/testing/mochitest/runtests.py
-@@ -1316,16 +1316,18 @@ class Mochitest(MochitestUtilsMixin):
-       # record post-test information
-       if status:
-         log.info("TEST-UNEXPECTED-FAIL | %s | application terminated with exit code %s", self.lastTestSeen, status)
-       else:
-         self.lastTestSeen = 'Main app process exited normally'
+diff --git a/mobile/android/config/mozconfigs/common b/mobile/android/config/mozconfigs/common
+--- a/mobile/android/config/mozconfigs/common
++++ b/mobile/android/config/mozconfigs/common
+@@ -49,9 +49,14 @@ HOST_CXX="/tools/gcc-4.7.2-0moz1/bin/g++
  
-       log.info("INFO | runtests.py | Application ran for: %s", str(datetime.now() - startTime))
+ # Avoid dependency on libstdc++ 4.7
+ ac_add_options --enable-stdcxx-compat
  
-+      mozcrash.collectGcdaData()
-+
-       # Do a final check for zombie child processes.
-       zombieProcesses = self.checkForZombies(processLog, utilityPath, debuggerInfo)
+ mk_add_options "export ANT_HOME=$topsrcdir/apache-ant"
  
-       # check for crashes
-       minidump_path = os.path.join(self.profile.profile, "minidumps")
-       crashed = mozcrash.check_for_crashes(minidump_path,
-                                            symbolsPath,
-                                            test_name=self.lastTestSeen)
-diff --git a/testing/mozbase/mozcrash/mozcrash/mozcrash.py b/testing/mozbase/mozcrash/mozcrash/mozcrash.py
---- a/testing/mozbase/mozcrash/mozcrash/mozcrash.py
-+++ b/testing/mozbase/mozcrash/mozcrash/mozcrash.py
-@@ -1,14 +1,15 @@
- # This Source Code Form is subject to the terms of the Mozilla Public
- # License, v. 2.0. If a copy of the MPL was not distributed with this file,
- # You can obtain one at http://mozilla.org/MPL/2.0/.
+ mk_add_options "export PATH=$topsrcdir/apache-ant/bin:$PATH"
  
- __all__ = ['check_for_crashes',
--           'check_for_java_exception']
-+           'check_for_java_exception',
-+           'collectGcdaData']
- 
- import glob
- import os
- import re
- import shutil
- import subprocess
- import sys
- import tempfile
-@@ -199,8 +200,25 @@ def check_for_java_exception(logcat, qui
-                     exception_location = m.group(1)
-                 if not quiet:
-                     print "PROCESS-CRASH | java-exception | %s %s" % (exception_type, exception_location)
-             else:
-                 print "Automation Error: Logcat is truncated!"
-             break
- 
-     return found_exception
-+
-+gcovprefix = os.path.realpath(os.curdir)
-+os.environ['GCOV_PREFIX'] = gcovprefix
-+def collectGcdaData():
-+    print ("Uploading gcda data")
-+    output = os.path.join(os.environ['MOZ_UPLOAD_DIR'], "gcda.zip")
-+    num = 0
-+    while os.path.exists(output):
-+        num += 1
-+        output = os.path.join(os.environ['MOZ_UPLOAD_DIR'], "gcda-%d.zip" % num)
-+    import zipfile
-+    with zipfile.ZipFile(output, 'w') as tar:
-+        for dirpath, dirnames, filenames in os.walk(gcovprefix):
-+            gcdafiles = (f for f in filenames if f.endswith('.gcda'))
-+            for filename in gcdafiles:
-+                fullname = os.path.join(dirpath, filename)
-+                tar.write(fullname, arcname=os.path.normpath(fullname))
-diff --git a/testing/runcppunittests.py b/testing/runcppunittests.py
---- a/testing/runcppunittests.py
-+++ b/testing/runcppunittests.py
-@@ -122,16 +122,17 @@ class CPPUnitTests(object):
-             if single_result:
-                 pass_count += 1
-             else:
-                 fail_count += 1
- 
-         log.info("Result summary:")
-         log.info("Passed: %d" % pass_count)
-         log.info("Failed: %d" % fail_count)
-+        mozcrash.collectGcdaData()
-         return fail_count == 0
- 
- class CPPUnittestOptions(OptionParser):
-     def __init__(self):
-         OptionParser.__init__(self)
-         self.add_option("--xre-path",
-                         action = "store", type = "string", dest = "xre_path",
-                         default = None,
-diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
---- a/testing/xpcshell/runxpcshelltests.py
-+++ b/testing/xpcshell/runxpcshelltests.py
-@@ -1498,16 +1498,20 @@ class XPCShellTests(object):
-                 self.log.info("INFO | %s could not be cleaned up." % directory)
- 
-         if exceptions:
-             self.log.info("INFO | Following exceptions were raised:")
-             for t in tracebacks:
-                 self.log.error(t)
-             raise exceptions[0]
- 
-+        # Don't output the log if we're doing tests
-+        if self.log.handlers[0].stream == sys.stdout:
-+            mozcrash.collectGcdaData()
-+
-         if self.testCount == 0:
-             self.log.error("TEST-UNEXPECTED-FAIL | runxpcshelltests.py | No tests run. Did you pass an invalid --test-path?")
-             self.failCount = 1
- 
-         self.log.info("INFO | Result summary:")
-         self.log.info("INFO | Passed: %d" % self.passCount)
-         self.log.info("INFO | Failed: %d" % self.failCount)
-         self.log.info("INFO | Todo: %d" % self.todoCount)
+-JS_BINARY="$topsrcdir/mobile/android/config/js_wrapper.sh"
++# Enable code coverage
++export CFLAGS="--coverage"
++export CXXFLAGS="--coverage"
++export LDFLAGS="--coverage"
++export HOST_LDFLAGS="--coverage"
++S_BINARY="$topsrcdir/mobile/android/config/js_wrapper.sh"
+diff --git a/testing/mozharness/mozharness.json b/testing/mozharness/mozharness.json
+--- a/testing/mozharness/mozharness.json
++++ b/testing/mozharness/mozharness.json
+@@ -1,4 +1,4 @@
+ {
+-    "repo": "https://hg.mozilla.org/build/mozharness",
++    "repo": "https://hg.mozilla.org/users/Pidgeot18_gmail.com/mozharness-cc",
+     "revision": "production"
+ }
 diff --git a/toolkit/mozapps/installer/packager.mk b/toolkit/mozapps/installer/packager.mk
 --- a/toolkit/mozapps/installer/packager.mk
 +++ b/toolkit/mozapps/installer/packager.mk
-@@ -736,16 +736,17 @@ stage-package: $(MOZ_PKG_MANIFEST)
+@@ -713,23 +713,20 @@ stage-package: $(MOZ_PKG_MANIFEST)
  ifndef LIBXUL_SDK
  ifdef MOZ_PACKAGE_JSSHELL
  # Package JavaScript Shell
@@ -262,32 +106,42 @@ diff --git a/toolkit/mozapps/installer/packager.mk b/toolkit/mozapps/installer/p
  	$(MAKE_JSSHELL)
  endif # MOZ_PACKAGE_JSSHELL
  endif # LIBXUL_SDK
-+	find $(DEPTH) -name '*.gcno' | tar -cjf $(DIST)/$(GCNO_TAR) -T -
+-ifdef MOZ_CODE_COVERAGE
+ 	# Package code coverage gcno tree
+ 	@echo 'Packaging code coverage data...'
+-	$(RM) $(CODE_COVERAGE_ARCHIVE_BASENAME).zip
+-	$(PYTHON) -mmozbuild.codecoverage.packager \
+-		--output-file='$(DIST)/$(PKG_PATH)$(CODE_COVERAGE_ARCHIVE_BASENAME).zip'
+-endif
++	$(RM) $(CODE_COVERAGE_ARCHIVE_BASENAME).tbz2
++	find $(DEPTH) -name '*.gcno' | tar -cjf '$(DIST)/all-gcno.tbz2' -T -
+ ifeq (Darwin, $(OS_ARCH))
+ ifdef MOZ_ASAN
+ 	@echo "Rewriting ASan runtime dylib paths for all binaries in $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH) ..."
+ 	$(PYTHON) $(MOZILLA_DIR)/build/unix/rewrite_asan_dylib.py $(DIST)/$(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)
+ endif # MOZ_ASAN
+ endif # Darwin
  
  prepare-package: stage-package
+@@ -881,20 +878,18 @@ UPLOAD_FILES= \
+   $(call QUOTED_WILDCARD,$(PKG_JSSHELL)) \
+   $(if $(UPLOAD_EXTRA_FILES), $(foreach f, $(UPLOAD_EXTRA_FILES), $(wildcard $(DIST)/$(f))))
  
- make-package-internal: prepare-package make-sourcestamp-file make-buildinfo-file
- 	@echo 'Compressing...'
- 	cd $(DIST) && $(MAKE_PACKAGE)
- 
- make-package: FORCE
-@@ -865,16 +866,19 @@ CHECKSUM_FILES = $(CHECKSUM_FILE)
- ifeq (WINNT,$(OS_TARGET))
- UPLOAD_EXTRA_FILES += host/bin/mar.exe
- UPLOAD_EXTRA_FILES += host/bin/mbsdiff.exe
- else
- UPLOAD_EXTRA_FILES += host/bin/mar
- UPLOAD_EXTRA_FILES += host/bin/mbsdiff
+ ifdef MOZ_CRASHREPORTER_UPLOAD_FULL_SYMBOLS
+ UPLOAD_FILES += \
+   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip)
  endif
  
-+GCNO_TAR := all-gcno.tbz2
-+UPLOAD_EXTRA_FILES += $(GCNO_TAR)
-+
- UPLOAD_FILES= \
-   $(call QUOTED_WILDCARD,$(DIST)/$(PACKAGE)) \
-   $(call QUOTED_WILDCARD,$(INSTALLER_PACKAGE)) \
-   $(call QUOTED_WILDCARD,$(DIST)/$(COMPLETE_MAR)) \
-   $(call QUOTED_WILDCARD,$(DIST)/$(LANGPACK)) \
-   $(call QUOTED_WILDCARD,$(wildcard $(DIST)/$(PARTIAL_MAR))) \
-   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(TEST_PACKAGE)) \
-   $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip) \
+-ifdef MOZ_CODE_COVERAGE
+ UPLOAD_FILES += \
+-  $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(CODE_COVERAGE_ARCHIVE_BASENAME).zip)
+-endif
++  $(call QUOTED_WILDCARD,$(DIST)/all-gcno.tbz2)
+ 
+ SIGN_CHECKSUM_CMD=
+ ifdef MOZ_SIGN_CMD
+ # If we're signing with gpg, we'll have a bunch of extra detached signatures to
+ # upload. We also want to sign our checksums file
+ SIGN_CHECKSUM_CMD=$(MOZ_SIGN_CMD) -f gpg $(CHECKSUM_FILE)
+ 
+ CHECKSUM_FILES += $(CHECKSUM_FILE).asc
