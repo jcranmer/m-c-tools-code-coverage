@@ -15,6 +15,8 @@ import zipfile
 
 from optparse import OptionParser
 
+GCNO_EXTS = ['code-coverage-gcno.zip', 'code-coverage-gcno.nzip']
+
 TestConfig = {}
 TestConfig['Cpp'] = {'name': 'cppunit'}
 TestConfig['Jit'] = {'name': 'jittest'}
@@ -27,12 +29,13 @@ TestConfig['M-5'] = {'name': 'mochitest-5'}
 TestConfig['M-bc'] = {'name': 'mochitest-browser-chrome'}
 TestConfig['M-dt'] = {'name': 'mochitest-devtools'}
 TestConfig['M-gl'] = {'name': 'mochitest-webgl'}
-TestConfig['M-oth'] = {
-    'name': ['mochitest-chrome', 'mochitest-a11y', 'mochitest-plugins']
-}
+# XXX: New scripts only upload 1 gcda.zip for multiple test runs.
+TestConfig['M-oth'] = {'name': 'mochitest-other'}
 TestConfig['M-e10s'] = {'name': 'mochitest-e10s'}
 TestConfig['M-e10s-bc'] = {'name': 'mochitest-e10s-browser-chrome'}
 TestConfig['M-e10s-dt'] = {'name': 'mochitest-e10s-devtools'}
+TestConfig['M-JP'] = {'name': 'mochitest-jetpack'}
+TestConfig['M-p'] = {'name': 'mochitest-push'}
 TestConfig['Mn'] = {'name': 'marionette'}
 TestConfig['R-C'] = {'name': 'crashtest'}
 TestConfig['R-Cipc'] = {'name': 'crashtest-ipc'}
@@ -79,63 +82,32 @@ def loadConfig(job):
 def loadJSON(uri):
     return json.load(urllib2.urlopen("http://treeherder.mozilla.org" + uri))
 
-# So jobs became a list instead of a dict. This is the map of indices to labels
-# so I can sanely reference them. Found from treeherder/webapp/api/utils.py on
-# https://github.com/mozilla/treeherder-service
-JOB_PROPERTIES = {
-    "submit_timestamp": 0,
-    "machine_name": 1,
-    "job_group_symbol": 2,
-    "job_group_name": 3,
-    "platform_option": 4,
-    "job_type_description": 5,
-    "result_set_id": 6,
-    "result": 7,
-    "id": 8,
-    "machine_platform_architecture": 9,
-    "end_timestamp": 10,
-    "build_platform": 11,
-    "job_guid": 12,
-    "job_type_name": 13,
-    "platform": 14,
-    "state": 15,
-    "running_eta": 16,
-    "pending_eta": 17,
-    "build_os": 18,
-    "who": 19,
-    "failure_classification_id": 20,
-    "job_type_symbol": 21,
-    "reason": 22,
-    "job_group_description": 23,
-    "job_coalesced_to_guid": 24,
-    "machine_platform_os": 25,
-    "start_timestamp": 26,
-    "build_architecture": 27,
-    "build_platform_id": 28,
-    "resource_uri": 29,
-    "option_collection_hash": 30,
-    "ref_data_name": 31
-}
-# This list can maps the array indexes to the
-# corresponding property names
-JOB_PROPERTY_RETURN_KEY = [None]*len(JOB_PROPERTIES)
-for k, v in JOB_PROPERTIES.iteritems():
-    JOB_PROPERTY_RETURN_KEY[v] = k
-
-def remapJob(job):
-    return dict(map(lambda i: (JOB_PROPERTY_RETURN_KEY[i], job[i]), range(len(JOB_PROPERTIES))))
+def shortName(job):
+    return "%(platform)s %(job_group_symbol)s-%(job_type_symbol)s" % job
 
 def downloadTreeherder(revision, outdir):
+    print("Loading data from treeherder")
+    # Grab the result_set_id for the jobs query
+    resultid = loadJSON("/api/project/try/resultset/" +
+        "?revision=" + revision)['results'][0]['id']
     # Load the list of jobs from treeherder
-    data = loadJSON("/api/project/try/resultset/" +
-        "?format=json&with_jobs=true&revision=" + revision)['results'][0]
+    data = loadJSON(
+        "/api/project/try/jobs/?count=2000&return_type=list&result_set_id=%d"
+        % resultid)
+    remap = data['job_property_names']
     platforms = dict()
-    for p in data['platforms']:
-        jobs = []
-        for g in p['groups']:
-            jobs += g['jobs']
-        jobs = map(remapJob, jobs)
-        platforms[p['name'] + '-' + p['option']] = jobs
+    for job in data['results']:
+        job = dict(zip(remap, job))
+        # Ignore unfinished jobs
+        if job['state'] != 'completed':
+            print '%s has not completed, ignoring' % shortName(job)
+            continue
+        # Grab some interesting job info
+        job['info'] = loadJSON(
+            "/api/project/try/artifact/?job_id=%d&name=Job+Info" % job['id']
+            )[0]['blob']
+        platform = "%(platform)s-%(platform_option)s" % job
+        platforms.setdefault(platform, []).append(job)
 
     info_files = []
     # For each platform, work out the corresponding FTP dir
@@ -144,10 +116,9 @@ def downloadTreeherder(revision, outdir):
         if pname.startswith('android'): continue # XXX
         elif pname.startswith('osx'): continue # XXX
         jobs = platforms[pname]
-        if jobs[0]['result'] == 'busted':
-            print "Job %s did not build correctly, skipping" % pname
-            continue
-        logfile = loadJSON(jobs[0]['resource_uri'])['logs'][0]['url']
+
+        # Grab the directory of a log and spit out the FTP dir.
+        logfile = jobs[0]['info']['logurl']
         ftpdir = logfile[logfile.find('.org/') + 5:logfile.rfind('/')]
         ftpplatformdir = ftpdir[ftpdir.rfind('/') + 1:]
 
@@ -160,10 +131,13 @@ def downloadTreeherder(revision, outdir):
         ftp = ftplib.FTP("ftp.mozilla.org")
         ftp.login()
         ftp.cwd(ftpdir)
-        collector = CoverageCollector(platformdir, ftp)
+        collector = CoverageCollector(platformdir, pname, ftp)
         collector.downloadNotes()
 
-        for job in jobs[1:]:
+        for job in jobs:
+            # Ignore builder jobs here.
+            if job['job_type_symbol'] == 'B':
+                continue
             info_files += collector.processJob(job)
 
     # Now that we have all of the info files, combine these into a master file.
@@ -177,27 +151,28 @@ def downloadTreeherder(revision, outdir):
         subprocess.check_call([ccov, '-a', total, '-a', x, '-o', total])
 
 class CoverageCollector(object):
-    def __init__(self, localdir, ftp):
+    def __init__(self, localdir, platform, ftp):
         self.localdir = localdir
         self.ftp = ftp
         self.platformdir = ftp.pwd().split('/')[-1]
-        self.platform = self.platformdir.split('-')[-1]
-        if self.platform == 'debug':
-            self.isDebug = True
-            self.platform = self.platformdir.split('-')[-2]
-        else:
-            self.isDebug = False
+        self.platform = platform
 
     def downloadNotes(self):
         files = self.ftp.nlst()
 
         # First, find the gcno data.
-        package = filter(lambda f: f == 'all-gcno.tbz2', files)[0]
-        self.gcnotar = os.path.join(self.localdir, 'gcno.tar.bz2')
+        for ext in GCNO_EXTS:
+            package = filter(lambda f: f.endswith(ext), files)
+            if len(package) == 1:
+                break
+        else:
+            print 'Did not find files in FTP directory for %s' % self.platform
+            return
+        self.gcnotar = os.path.join(self.localdir, 'gcno.zip')
         if not os.path.exists(self.gcnotar):
             print "Downloading package for %s" % self.platform
             with open(self.gcnotar, 'wb') as write:
-                self.ftp.retrbinary("RETR %s" % package,
+                self.ftp.retrbinary("RETR %s" % package[0],
                     lambda block : write.write(block))
 
         self.ftp.quit()
@@ -206,21 +181,13 @@ class CoverageCollector(object):
         tconfig = loadConfig(job)
 
         # Find all of the gcda artifacts.
-        data = loadJSON(job['resource_uri'])
-        artifact = filter(lambda x: x['name'] == 'Job Info',
-            data['artifacts'])
-        if len(artifact) == 0:
-            print("Can't find results for %s, try again later?" %
-                tconfig['shortname'])
-            return []
-        ajson = loadJSON(artifact[0]['resource_uri'])
         artifacts = dict()
-        for a in ajson['blob']['job_details']:
+        for a in job['info']['job_details']:
             if 'title' not in a:
                 continue
             if a['title'] != 'artifact uploaded': continue
             artifacts[a['value']] = a['url']
-        files = filter(lambda x: re.match('gcda.*?.zip', x), artifacts)
+        files = filter(lambda x: re.match('.*gcda.*\.zip', x), artifacts)
         files.sort()
         if len(files) == 0:
             print("No coverage data for %s" % tconfig['shortname'])
@@ -270,7 +237,7 @@ class CoverageCollector(object):
             basedir = sub
 
         # Copy the gcno files over
-        with tarfile.open(self.gcnotar) as gcnofd:
+        with zipfile.ZipFile(self.gcnotar) as gcnofd:
             gcnofd.extractall(basedir)
 
         # Delete jchuff.gcda. This causes an infinite loop in gcov for some
@@ -281,9 +248,6 @@ class CoverageCollector(object):
 
         # Run lcov to compute the output lcov file
         with open(lcovlog, 'w') as logfile:
-            #subprocess.check_call(['lcov', '-c', '-d', basedir, '-o', lcovpre,
-            #    '-t', test + '-' + self.platformdir, '--gcov-tool', 'gcov-4.7'],
-            #    stdout=logfile, stderr=subprocess.STDOUT)
             subprocess.check_call([ccov, '-c', basedir, '-o', lcovpre,
                 '-t', test, '--gcov-tool', 'gcov-4.7'],
                 stdout=logfile, stderr=subprocess.STDOUT)
