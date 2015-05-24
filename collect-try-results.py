@@ -257,6 +257,10 @@ class CoverageCollector(object):
             subprocess.check_call([ccov, '-a', lcovpre, '-e', '/builds/*',
                 '-o', lcovname], stdout=logfile, stderr=subprocess.STDOUT)
 
+            # Normalize the prefix names to the mozilla-central directory
+            subprocess.check_call(['sed', '-e',
+                's+^SF:/builds/slave/[^/]*/build/src/+SF:+', '-i', lcovname])
+
             # Remove the original lcov file.
             os.remove(lcovpre)
 
