@@ -17,67 +17,22 @@ from optparse import OptionParser
 
 GCNO_EXTS = ['code-coverage-gcno.zip', 'code-coverage-gcno.nzip']
 
-TestConfig = {}
-TestConfig['Cpp'] = {'name': 'cppunit'}
-TestConfig['Jit'] = {'name': 'jittest'}
-TestConfig['JP'] = {'name': 'jetpack'}
-TestConfig['M-1'] = {'name': 'mochitest-1'}
-TestConfig['M-2'] = {'name': 'mochitest-2'}
-TestConfig['M-3'] = {'name': 'mochitest-3'}
-TestConfig['M-4'] = {'name': 'mochitest-4'}
-TestConfig['M-5'] = {'name': 'mochitest-5'}
-TestConfig['M-bc'] = {'name': 'mochitest-browser-chrome'}
-TestConfig['M-dt'] = {'name': 'mochitest-devtools'}
-TestConfig['M-gl'] = {'name': 'mochitest-webgl'}
-# XXX: New scripts only upload 1 gcda.zip for multiple test runs.
-TestConfig['M-oth'] = {'name': 'mochitest-other'}
-TestConfig['M-e10s'] = {'name': 'mochitest-e10s'}
-TestConfig['M-e10s-bc'] = {'name': 'mochitest-e10s-browser-chrome'}
-TestConfig['M-e10s-dt'] = {'name': 'mochitest-e10s-devtools'}
-TestConfig['M-JP'] = {'name': 'mochitest-jetpack'}
-TestConfig['M-p'] = {'name': 'mochitest-push'}
-TestConfig['Mn'] = {'name': 'marionette'}
-TestConfig['R-C'] = {'name': 'crashtest'}
-TestConfig['R-Cipc'] = {'name': 'crashtest-ipc'}
-TestConfig['R-J'] = {'name': 'jsreftest'}
-TestConfig['R-R'] = {'name': 'reftest'}
-TestConfig['R-Ripc'] = {'name': 'reftest-ipc'}
-TestConfig['R-Ru'] = {'name': 'reftest-no-accel'}
-TestConfig['R-e10s-C'] = {'name': 'crashtest-e10s'}
-TestConfig['R-e10s-R-e10s'] = {'name': 'reftest-e10s'}
-TestConfig['Wr'] = {'name': 'web-platform-tests-reftests'}
-TestConfig['W'] = {'name': 'web-platform-tests'}
-TestConfig['X'] = {'name': 'xpcshell'}
-
 # This is a map of builder filenames to (display name, hidden) tuples.
 builder_data = dict()
 
 ccov = None
 def loadConfig(job):
-    shortname = job['job_group_symbol'] + '-' + job['job_type_symbol']
-    if shortname.startswith('?-'):
-        shortname = shortname[2:]
-    result = {'shortname': shortname}
-    # If we have a name like M-bc2, try checking M-bc and adding a -2. This
-    # simplifies the config generation.
-    if shortname not in TestConfig:
-        match = re.match('^(.*?)-?([0-9]+)$', shortname)
-        if match is not None:
-            result.update(TestConfig[match.group(1)])
-            result['test'] = [result['name']]
-            result['name'] = result['name'] + '-' + match.group(2)
-        else:
-            raise Exception("Unknown test %s" % shortname)
+    name = job['ref_data_name'].split(' ')[-1]
+    result = re.match('^(.*?)-?([0-9+])$', name)
+    if result is not None:
+        test = result.group(1)
     else:
-        result.update(TestConfig[shortname])
-    if not isinstance(result['name'], list):
-        result['name'] = [result['name']]
-    else:
-        # gcda.zip sorts after gcda-N.zip, so move first to last.
-        result['name'].append(result['name'].pop(0))
-    if 'test' not in result:
-        result['test'] = result['name']
-    return result
+        test = name
+    return {
+        'test': [test],
+        'name': [name],
+        'shortname': shortName(job)
+    }
 
 def loadJSON(uri):
     return json.load(urllib2.urlopen("http://treeherder.mozilla.org" + uri))
@@ -115,6 +70,8 @@ def downloadTreeherder(revision, outdir):
         print('Processing platform %s' % pname)
         if pname.startswith('android'): continue # XXX
         elif pname.startswith('osx'): continue # XXX
+        elif 'b2g' in pname: continue # XXX (need taskcluster goodness)
+        elif 'mulet' in pname: continue # XXX (need taskcluster goodness)
         jobs = platforms[pname]
 
         # Grab the directory of a log and spit out the FTP dir.
